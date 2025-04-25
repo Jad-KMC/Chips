@@ -1,6 +1,7 @@
 # Chips 
 Open Source codebase for managing RWA tokens on the kadena blockchain
 
+======================================
 
 Deliverable 1: Energy Token Framework
 
@@ -9,6 +10,7 @@ See:
 
 kWATT.pact and its usage in chips.pact
 
+======================================
 
 Deliverable 2: Hashrate Rental Framework
 
@@ -24,7 +26,7 @@ chips-oracle.pact - for prices of coins not on the kadena blockchain, such as ET
 
 chips-presale.pact - this is very minor, we store our metrics here for profitability purposes such as energy usage per machine type and current profitability. `get-kwatts-and-power` is going to be the main function pulled from here.
 
-
+======================================
 
 Deliverable 3: Oracle Integration Framework
 
