@@ -517,35 +517,54 @@
   (defun get-mined-for-lock (lock-id:string coin:string)
     (let* (
         (lock-data (read locks-table lock-id))
-        (previously-mined (at 'coins-owed lock-data))
-        (lock-change-index (at 'change-index lock-data))
+        (previously-mined (at 'coins-owed lock-data)) ;0.0
+        (lock-change-index (at 'change-index lock-data)) ;1
         (mined-index-LTC (if (= "DOGE" coin)
                             (+ "DOGE" (drop 3 (at 'mined-index lock-data)))
                             (at 'mined-index lock-data)
                             ))
-        (mined-index-start mined-index-LTC)
+        (mined-index-start mined-index-LTC) 
         (mined-index-end (if (< (at 'end-time lock-data) (at 'block-time (chain-data)))
                             (decide-end-index (at 'end-time lock-data) coin)
                             (get-recent coin)
                           ) )
-        (start-mined-data (read-mined coin mined-index-start))
-        (recent-mined-data (read-mined coin mined-index-end)) ;most recent information from the mined-table
-        (recent-change-index (get-count (format "{}-change-index" [(at 'coin lock-data)])) )
-        (previous (at 'previous recent-mined-data)) ;list
-        (divisor (at 'divisor recent-mined-data)) ;list
+        (start-mined-data (read-mined mined-index-start)) 
+        (recent-mined-data (read-mined mined-index-end)) 
+        (recent-change-index (get-count (format "{}-change-index" [(at 'coin lock-data)])) ) ; 2
+        (previous (at 'previous recent-mined-data)) 
+        (divisor (at 'divisor recent-mined-data)) 
         (lock-hashrate (at 'hashrate lock-data))
+        (mined-at-first-addition (fold (+) 0.0 (drop (- (length previous) (+ lock-change-index 2)) previous)))
 
-        ; all calculations account for the users proportion of the hashrate
-        (cascading (fold (+) 0.0 (map (cascading-helper lock-hashrate previous divisor) (enumerate lock-change-index recent-change-index))) )
-        (first-calc (* (at 'mined start-mined-data) (/ lock-hashrate (at 'total-hashrate start-mined-data))) )
-        (last-calc (* (- (at 'mined recent-mined-data) (fold (+) 0.0 (drop lock-change-index previous))) (/ lock-hashrate (at 'total-hashrate recent-mined-data))) )
-        (total (round (+ (- cascading first-calc) last-calc) 8) )
+        ; total if the rental spans across only one index
+        (total1 (if (= lock-change-index recent-change-index)
+          (* (- (at 'mined recent-mined-data) (at 'mined start-mined-data)) (/ lock-hashrate (at 'total-hashrate start-mined-data)))
+          0.0))
+
+        ; Total mined for the first index
+        (first-calc (* (- mined-at-first-addition (at 'mined start-mined-data)) (/ lock-hashrate (at 'total-hashrate start-mined-data))))
+
+        ; total mined for every index between the first and last.
+        (cascading (if (> (- recent-change-index lock-change-index) 1)
+          (fold (+) 0.0 (map (cascading-helper lock-hashrate previous divisor) (enumerate (+ lock-change-index 1) (- recent-change-index 1))))
+          0.0) )
+
+        ; total mined for the last index
+        (last-calc (* (- (at 'mined recent-mined-data) (fold (+) 0.0 previous)) (/ lock-hashrate (at 'total-hashrate recent-mined-data))))
+        (total (if (= 0.0 total1)
+          (+ (+ first-calc cascading) last-calc)
+          total1))
+        (adjusted-total (if (= "LTC" coin) (* total 10) total))
       )
       (if (at 'released lock-data)
         0
-        (+ total previously-mined))
+        (+ (round adjusted-total 8) previously-mined))
     )
   )
+
+  (defun cascading-helper (lock-hashrate:decimal previous:list divisor:list index:integer)
+    (* (at index previous) (/ lock-hashrate (at (+ index 1) divisor)))
+  ) 
 
   (defun get-all-unclaimed-rewards ()
     @doc "For accounting purposes, return the entire reward balance owed to Chips customers"
@@ -571,23 +590,6 @@
     )
   )
 
-  (defun migrate-icBTC (account:string cType:string cToken-amount:decimal rental-duration:integer previously-mined:decimal caller:string)
-    (let* (
-        (hashrate cToken-amount)
-        (total-kWATTs-required (* (* 0.45 rental-duration) cToken-amount))
-        (orders-count-string (int-to-str 10 (get-count ORDERS_COUNT)))
-        (cToken-module:module{fungible-v2} (at 'fungible (read currency-table cType)))
-      )
-      (with-capability (PRIVATE)
-        (increase-count ORDERS_COUNT)
-        (mint-kWATT CHIPS_LOCKED_WALLET (round total-kWATTs-required 8))
-        (order-work cType cToken-amount)
-        (create-lock total-kWATTs-required cToken-amount account rental-duration hashrate (drop 1 cType) cType previously-mined)
-        (format "A {} day {} rental has been started on behalf of {} with a hashrate of {}. Previously-mined: {}. The rental ID is: {} " [rental-duration cType account hashrate previously-mined orders-count-string])
-      )
-    )
-  )
-
   (defun get-unclaimed-for-lock (lock-id:string)
     @doc "Returns the total amount of rewards unclaimed for a rental"
     (let* (
@@ -597,10 +599,6 @@
       )
       { "coin" : (at 'coin lock-data), "rewards" : rewards , "DOGE" : DOGE-rewards }
     )
-  )
-
-  (defun cascading-helper (lock-hashrate:decimal previous:list divisor:list index:integer)
-    (* (at index previous) (/ lock-hashrate (at index divisor)))
   )
 
   (defun decide-end-index (end-time:time coin:string)
