@@ -7,7 +7,6 @@
 
 ; SECTION 2: NFT-based assignment of computational resources
 ;   `chips-policy` smart contract is where all of the NFT data is stored. New NFTs are generated when new machines are acquired`
-;     the change-total-hashrate function expects one policy per algorithm.
 
 ; SECTION 3: Token-based rental payments
 ; RENTALS
