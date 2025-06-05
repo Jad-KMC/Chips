@@ -555,7 +555,7 @@
   )
 
   (defun register-guard (g)
-      (write guard-storage-table "chips" {'g:g})
+      (insert guard-storage-table "chips" {'g:g})
   )
 
   (defun initialize:string ()
