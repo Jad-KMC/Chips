@@ -1,3 +1,16 @@
+
+import fs from 'fs/promises';
+import path from 'path';
+import {
+  Pact,
+  createClient,
+  createSignWithKeypair
+} from '@kadena/client';
+
+
+// ------------------------------------------------------------------------------------
+// CONFIGURATION
+// ------------------------------------------------------------------------------------
 /**
  * Full end‑to‑end Kadena mining‑data ingestion & submission script
  *
@@ -13,34 +26,17 @@
  * - testnet contract is "free.chipsKDA-policy"
  */
 
-import fs from 'fs/promises';
-import path from 'path';
-import Pact from 'pact-lang-api';
-
-// ------------------------------------------------------------------------------------
-// CONFIGURATION
-// ------------------------------------------------------------------------------------
 const NETWORK_ID    = 'testnet04';
 const CHAIN_ID      = '1';
 const API_HOST      = `https://api.testnet.chainweb.com/chainweb/0.0/${NETWORK_ID}/chain/${CHAIN_ID}/pact`;
+const CLIENT        = createClient(API_HOST);
 const CONTRACT_NAME = 'free.chipsKDA-policy';
-const CALLER        = "k:4aab9f08f1bd86c3ce007a9a87225ef061c09e7062efa622e2fd704c24514cfa"; //replace with your public key with oracle permissions
+const CALLER        = "k:4aab9f08f1bd86c3ce007a9a87225ef061c09e7062efa622e2fd704c24514cfa";
 const KEY_PAIR      = {
   publicKey: CALLER.slice(2),
   secretKey: "SECRET_KEY_GOES_HERE"
 };
-
-// ------------------------------------------------------------------------------------
-// TIMING HELPERS
-// ------------------------------------------------------------------------------------
-/** Pact expects a recent timestamp; subtract a small buffer for safety */
-function creationTime() {
-  return Math.floor(Date.now() / 1000) - 15;
-}
-/** Simple delay for throttling submissions */
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+const signWithKeypair = createSignWithKeypair(KEY_PAIR);
 
 // ------------------------------------------------------------------------------------
 // READ-ONLY CONTRACT CALL
@@ -53,35 +49,25 @@ function delay(ms) {
  * @param {...any} args    - zero or more args for that function
  * @returns {Promise<any[]>} - `.data` from Pact or [] on error
  */
+// ------------------------------------------------------------------------------------
 async function fetchContractData(fnName, ...args) {
-  // Serialize args: strings quoted, numbers as-is
-  const ser = args.map(a =>
-    typeof a === 'string' ? `"${a}"` : a
-  ).join(' ');
-  const pactCode = ser
-    ? `(${CONTRACT_NAME}.${fnName} ${ser})`
-    : `(${CONTRACT_NAME}.${fnName})`;
-
-  const cmd = {
-    networkId: NETWORK_ID,
-    pactCode,
-    envData: {},
-    meta: {
-      creationTime: creationTime(),
-      ttl: 28000,
-      gasLimit: 930000,
-      chainId: CHAIN_ID,
-      gasPrice: 0.0000001,
-      sender: "" // read-only
-    }
-  };
-
   try {
-    const resp = await Pact.fetch.local(cmd, API_HOST);
-    if (resp.result.status === "success") {
-      return resp.result.data;
+    const builder = Pact.modules[CONTRACT_NAME][fnName](...args);
+    const transaction = Pact.builder
+      .execution(builder)
+      .setMeta({
+        chainId: CHAIN_ID,
+        senderAccount: CALLER,
+        gasLimit: 10000
+      })
+      .setNetworkId(NETWORK_ID)
+      .createTransaction();
+
+    const response = await CLIENT.local(transaction);
+    if (response?.result?.status === 'success') {
+      return response.result.data;
     } else {
-      console.error(`Error reading ${fnName}:`, resp.result.error.message);
+      console.error(`Error reading ${fnName}:`, response.result.error.message);
       return [];
     }
   } catch (err) {
@@ -100,6 +86,7 @@ async function fetchContractData(fnName, ...args) {
  * Example raw:
  *   "[2025-02-20 20:14:58.560],accept,...,C1:A80,...Diff 55/50,50(...)"
  */
+// ------------------------------------------------------------------------------------
 function parseLogLine(line) {
   const tsMatch = line.match(/^\[([^\]]+)\]/);
   const workerMatch = line.match(/,([^,]*?),[^\n]*?C(\d+):A(\d+)/);
@@ -125,10 +112,6 @@ function parseLogLine(line) {
  *      if numChips=50 → end = start + numChips - 1
  */
 function decodeAssociatedChips(binStr, numChips) {
-  // Strip leading '1' marker, then:
-  // assume upper bits before last 8 represent machine, last bits represent start
-  // here we'll take first 3 bits as machine, rest as start
-  const totalBits = binStr.length;
   const machineBits = 3;
   const machine = parseInt(binStr.slice(0, machineBits), 2);
   const start   = parseInt(binStr.slice(machineBits), 2);
@@ -149,7 +132,6 @@ function aggregateSharesByToken(shares, tokens, coin) {
     const { machine, start, end } =
       decodeAssociatedChips(associatedChips, numChips);
 
-    // Filter shares matching this machine & chip range & accepted
     const matched = shares.filter(s =>
       s.worker === `C${machine}` &&
       s.shareIndex >= start &&
@@ -179,45 +161,66 @@ function aggregateSharesByToken(shares, tokens, coin) {
 // ------------------------------------------------------------------------------------
 // SUBMISSION HELPER
 // ------------------------------------------------------------------------------------
+/**
+ * submitMiningData
+ *
+ * Submits mining stats for a given token using chips-policy.
+ */
+// ------------------------------------------------------------------------------------
 async function submitMiningData(detail) {
   const { tokenId, coin, shares, difficulty, duration, address } = detail;
-  // Build Pact code for submit-mining-data
-  const pactCode = `(${CONTRACT_NAME}.submit-mining-data "${tokenId}" "${coin}" ${shares} ${difficulty} ${duration} "${address}")`;
-  const cmd = {
-    networkId: NETWORK_ID,
-    keyPairs: KEY_PAIR,
-    pactCode,
-    envData: {},
-    meta: {
-      creationTime: creationTime(),
-      ttl: 800,
-      gasLimit: 800,
+
+  const builder = Pact.modules[CONTRACT_NAME]['submit-mining-data'](
+    tokenId, coin, shares, difficulty, duration, address
+  );
+
+  const unsignedTransaction = Pact.builder
+    .execution(builder)
+    .setMeta({
       chainId: CHAIN_ID,
-      gasPrice: 0.0000001,
-      sender: CALLER
-    }
-  };
+      senderAccount: CALLER,
+      gasLimit: 10000
+    })
+    .addSigner(KEY_PAIR.publicKey, (signFor) => [
+      signFor('coin.GAS'),
+      signFor(`${CONTRACT_NAME}.submit-mining-data`)
+    ])
+    .setNetworkId(NETWORK_ID)
+    .createTransaction();
 
   try {
-    console.log("Submitting:", detail);
-    const result = await Pact.fetch.send(cmd, API_HOST);
-    console.log("→ Result:", await Pact.fetch.listen(result.requestKey));
+    const signedTx = await signWithKeypair(unsignedTransaction);
+    const preflight = await CLIENT.preflight(signedTx);
+    if (preflight.result.status !== 'success') {
+      console.error("Preflight failed:", preflight.result.error?.message);
+      return;
+    }
+    const tx = await CLIENT.submit(signedTx);
+    console.log("Submitted:", detail);
+    console.log("→ Request Key:", tx.requestKey);
   } catch (err) {
     console.error("Submission error for", detail, err);
   }
 }
+
 // ------------------------------------------------------------------------------------
 // MAIN PROCESSING FUNCTION
 // ------------------------------------------------------------------------------------
-// The main function ties everything together:
-//   1. It takes a coin type as a command-line argument.
-//   2. It compiles the NFT-mining data by matching blockchain token data with aggregated mining logs.
-//   3. It then loops over each token entry, printing the data to be submitted, and calls submitMiningData.
-//   4. There is a 500-millisecond delay between each submission.
-//   5. Finally, it moves the processed logs folder (e.g. KDAMiningLogs) to a new folder ("processedKDAMiningLogs")
-//      to ensure that data is not submitted twice.
+/**
+ * The main function ties everything together:
+ *   1. It takes a coin type as a command-line argument.
+ *   2. It compiles the NFT-mining data by matching blockchain token data with aggregated mining logs.
+ *   3. It then loops over each token entry, printing the data to be submitted, and calls submitMiningData.
+ *   4. There is a 500-millisecond delay between each submission.
+ *   5. Finally, it moves the processed logs folder (e.g. KDAMiningLogs) to a new folder ("processedKDAMiningLogs")
+ *      to ensure that data is not submitted twice.
+ */
+// ------------------------------------------------------------------------------------
+async function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function main() {
-  // 1) Coin (e.g. "KDA","BTC","LTC") from CLI
   const coin = process.argv[2];
   if (!coin) {
     console.error("Usage: node script.js <KDA|BTC|LTC>");
@@ -227,10 +230,8 @@ async function main() {
   const logDir       = `${coin}MiningLogs`;
   const processedDir = `processed${coin}Logs`;
 
-  // Ensure processed directory exists
   await fs.mkdir(processedDir, { recursive: true });
 
-  // 2) Read & parse all log files
   const files = await fs.readdir(logDir);
   const shares = [];
   for (const file of files) {
@@ -239,14 +240,12 @@ async function main() {
       const parsed = parseLogLine(line);
       if (parsed) shares.push(parsed);
     }
-    // Move processed file
     await fs.rename(
       path.join(logDir, file),
       path.join(processedDir, file)
     );
   }
 
-  // 3) Fetch on-chain tokens
   const tokenIds = await fetchContractData("get-all-token-ids");
   const tokens = {};
   for (const id of tokenIds) {
@@ -257,17 +256,13 @@ async function main() {
     };
   }
 
-  // 4) Aggregate & compress per token
   const toSubmit = aggregateSharesByToken(shares, tokens, coin);
-
-  // 5) Submit each at 0.5s intervals
   for (const detail of toSubmit) {
     await submitMiningData(detail);
     await delay(500);
   }
 }
 
-// Execute
 main().catch(err => {
   console.error("Fatal error:", err);
   process.exit(1);
