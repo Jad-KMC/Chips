@@ -1,0 +1,633 @@
+(env-data {"disable-marmalade":false,
+          "disable-util-lib":false,
+          "disable-test-accounts":false})
+
+(load "kda-env/init.repl")
+
+
+(begin-tx)
+(namespace "free")
+(env-chain-data { "block-time": (time "2024-03-16T04:00:00Z")})
+(env-sigs [{"key": "chips-signatory", "caps": []}])
+(env-data {
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" }
+})
+
+(load "kwatt-v1.pact")
+(load "kWATT.pact")
+(load "cKDA.pact")
+(load "cBTC.pact")
+(load "cLTC.pact")
+(load "cKAS.pact")
+(load "cALPH.pact")
+
+(env-sigs [])
+(load "chips-policy.pact")
+(load "chips-oracle.pact")
+(load "chips-presale.pact")
+; (env-sigs [{"key": "alice", "caps": [coin.TRANSFER "alice" "chips-bank" 1.0]}])
+(load "chips.pact")
+(load "test-marmalade-kmc.pact")
+
+
+
+(commit-tx)
+
+
+(begin-tx)
+(use free.cKDA)
+(use free.cLTC)
+(use free.cBTC)
+(use free.cKAS)
+(use free.cALPH)
+(use free.kWATT)
+(use free.chips)
+(use free.chips-policy)
+
+;test kda token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-bank": { "keys": ["chips-bank-key"], "pred": "keys-all" }
+})
+(env-sigs [ { "key": "alice-key", "caps": [ (coin.TRANSFER "alice" "chips-bank" 1.0) ] } ])
+;end test kda token
+
+;; test kWatt token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["alice-key"], "pred": "keys-all" }
+})
+
+(free.kWATT.initialize)
+(env-sigs [ { "key": "chips-signatory", "caps": [ (free.kWATT.TRANSFER "chips-signatory" "alice" 10000.0) (free.kWATT.TRANSFER "chips-signatory" "bob" 10000.0) ] } ])
+(free.kWATT.get-balance "chips-signatory")
+(free.kWATT.transfer-create "chips-signatory" "alice" (read-keyset 'alice) 10000.0)
+(env-data {
+  "bob": { "keys": ["bob-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["bob-key"], "pred": "keys-all" }
+})
+(free.kWATT.transfer-create "chips-signatory" "bob" (read-keyset 'bob) 10000.0)
+;;; end test kWatt token
+
+;; test cKDA token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["alice-key"], "pred": "keys-all" }
+})
+(free.cKDA.initialize)
+(env-sigs [ { "key": "chips-signatory", "caps": [ (free.cKDA.TRANSFER "chips-signatory" "alice" 10000.0) (free.cKDA.TRANSFER "chips-signatory" "bob" 10000.0) ] } ])
+(free.cKDA.get-balance "chips-signatory")
+(free.cKDA.transfer-create "chips-signatory" "alice" (read-keyset 'alice) 10000.0)
+(env-data {
+  "bob": { "keys": ["bob-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["bob-key"], "pred": "keys-all" }
+})
+(free.cKDA.transfer-create "chips-signatory" "bob" (read-keyset 'bob) 10000.0)
+;;; end test cKDA token
+;; test cLTC token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["alice-key"], "pred": "keys-all" }
+})
+(free.cLTC.initialize)
+(env-sigs [ { "key": "chips-signatory", "caps": [ (free.cLTC.TRANSFER "chips-signatory" "alice" 10000.0)
+                                                  (free.cLTC.TRANSFER "chips-signatory" "bob" 10000.0) ] } ])
+(free.cLTC.get-balance "chips-signatory")
+(free.cLTC.transfer-create "chips-signatory" "alice" (read-keyset 'alice) 10000.0)
+(env-data {
+  "bob": { "keys": ["bob-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["bob-key"], "pred": "keys-all" }
+})
+(free.cLTC.transfer-create "chips-signatory" "bob" (read-keyset 'bob) 10000.0)
+;;; end test cLTC token
+;; test cBTC token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["alice-key"], "pred": "keys-all" }
+})
+(free.cBTC.initialize)
+(env-sigs [ { "key": "chips-signatory", "caps": [ (free.cBTC.TRANSFER "chips-signatory" "alice" 10000.0)
+                                                  (free.cBTC.TRANSFER "chips-signatory" "bob" 10000.0) ] } ])
+(free.cBTC.get-balance "chips-signatory")
+(free.cBTC.transfer-create "chips-signatory" "alice" (read-keyset 'alice) 10000.0)
+(env-data {
+  "bob": { "keys": ["bob-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["bob-key"], "pred": "keys-all" }
+})
+(free.cBTC.transfer-create "chips-signatory" "bob" (read-keyset 'bob) 10000.0)
+;;; end test cBTC token
+;; test cKAS token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["alice-key"], "pred": "keys-all" }
+})
+(free.cKAS.initialize)
+(env-sigs [ { "key": "chips-signatory", "caps": [ (free.cKAS.TRANSFER "chips-signatory" "alice" 10000.0)
+                                                  (free.cKAS.TRANSFER "chips-signatory" "bob" 10000.0) ] } ])
+(free.cKAS.get-balance "chips-signatory")
+(free.cKAS.transfer-create "chips-signatory" "alice" (read-keyset 'alice) 10000.0)
+(env-data {
+  "bob": { "keys": ["bob-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["bob-key"], "pred": "keys-all" }
+})
+(free.cKAS.transfer-create "chips-signatory" "bob" (read-keyset 'bob) 10000.0)
+;;; end test cKAS token
+;; test cALPH token
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["alice-key"], "pred": "keys-all" }
+})
+(free.cALPH.initialize)
+(env-sigs [ { "key": "chips-signatory", "caps": [ (free.cALPH.TRANSFER "chips-signatory" "alice" 10000.0)
+                                                  (free.cALPH.TRANSFER "chips-signatory" "bob" 10000.0) ] } ])
+(free.cALPH.get-balance "chips-signatory")
+(free.cALPH.transfer-create "chips-signatory" "alice" (read-keyset 'alice) 10000.0)
+(env-data {
+  "bob": { "keys": ["bob-key"], "pred": "keys-all" },
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" },
+  "ks": { "keys": ["bob-key"], "pred": "keys-all" }
+})
+(free.cALPH.transfer-create "chips-signatory" "bob" (read-keyset 'bob) 10000.0)
+;;; end test cALPH token
+
+(commit-tx)
+; (env-sigs [ { "key": "alice-key", "caps":
+;   [ (coin.TRANSFER "chips-signatory" "chips-bank" 10.0)
+;     (free.cKDA.TRANSFER "chips-signatory" "chips-bank" 10.0)
+;     (free.kWatt.TRANSFER "chips-signatory" "chips-bank" 10.0) ] } ])
+
+(env-data {})
+(env-sigs [])
+(begin-tx "fund initial tokens to the chips bank and initialize Chips contract")
+(env-sigs [ { "key": "alice-key", "caps": [
+  (coin.TRANSFER "alice" "chips-locked-wallet" 20000.0)
+  (free.kWATT.TRANSFER "alice" "chips-locked-wallet" 100000.0)
+  (free.cKDA.TRANSFER "alice" "chips-locked-wallet" 100000.0)
+  (free.cBTC.TRANSFER "alice" "chips-locked-wallet" 100000.0)
+  (free.cLTC.TRANSFER "alice" "chips-locked-wallet" 100000.0)
+  (free.cKAS.TRANSFER "alice" "chips-locked-wallet" 100000.0)
+  (free.cALPH.TRANSFER "alice" "chips-locked-wallet" 100000.0)
+  (coin.TRANSFER "alice" "chips-bank" 20000.0)
+  (free.kWATT.TRANSFER "alice" "chips-bank" 100000.0)
+  (free.cKDA.TRANSFER "alice" "chips-bank" 100000.0)
+  (free.cBTC.TRANSFER "alice" "chips-bank" 100000.0)
+  (free.cLTC.TRANSFER "alice" "chips-bank" 100000.0)
+  (free.cKAS.TRANSFER "alice" "chips-bank" 100000.0)
+  (free.cALPH.TRANSFER "alice" "chips-bank" 100000.0)  ] } ])
+
+(free.chips.initialize)
+(commit-tx)
+
+(begin-tx)
+(env-gasmodel "table")
+(env-gaslimit 55000)
+
+(env-gaslimit 1500000)
+(env-data {'chips: (free.chips-policy.get-all-for-rent "KDA")})
+
+(env-sigs [{"key": "oracle-key", "caps": [(free.chips.CALL_POLICY_MODULES)]}])
+(env-gas 0)
+
+(begin-tx "Attempt to submit mining shares without oracle keys")
+
+(env-sigs [{"key": "bob-key", "caps": [(free.chips.CALL_POLICY_MODULES)]}])
+(expect-failure
+  "submit fails without admin sig"
+  "Keyset failure (keys-all): [bob-key]"
+  (free.chips.insert-coin-mined "KDA" 3.0 "bob"))
+(commit-tx)
+
+
+; mainnet request keys for insert-coin-mined
+; WI6pgqkfLjFgn0wJ0dnTx7vjoJkoHURPXDt97-WnMhA
+; -I_fhb-u0hLaHlbhDkyRQ74W22JEo-o1Ceb_zNf_4qE
+(begin-tx "Simulate mining for KDA")
+(env-data {
+  "alice": { "keys": ["alice-key"], "pred": "keys-all" },
+  "ks": { "keys": ["chips-bank"], "pred": "keys-all" }
+})
+(env-sigs [ { "key": "alice-key", "caps": []}])
+(env-chain-data { "block-time": (time "2024-03-11T00:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 3.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-11T01:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 7.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-11T02:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 9.0 "alice")
+(commit-tx)
+
+(begin-tx "Attempt to submit a decreasing amount of mined KDA")
+
+(expect-failure
+  "Submit fails if the amount of KDA submitted is less than the previous amount"
+  "the amount mined cannot go down"
+  (free.chips.insert-coin-mined "KDA" 3.0 "alice"))
+
+
+(begin-tx "Start a rental with Bobs account keys")
+(env-sigs [ { "key": "bob-key", "caps":
+ [(coin.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.kWATT.TRANSFER "bob" "chips-locked-wallet" 10000.0)
+  (free.cKDA.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.chips.ACCOUNT_GUARD "bob")] } ])
+
+(free.kWATT.get-balance "bob")
+(expect "get balance"
+  10000.0
+  (free.kWATT.get-balance "bob"))
+
+(expect "get coin balance"
+  100000.0
+  (at 'balance (coin.details "bob")))
+
+; set time
+(env-chain-data { "block-time": (time "2024-03-11T03:40:00Z")})
+
+; mainnet request keys for start-rental:
+; Z-ELZi2QEzYspJx8eXyar-E5KKzoYl7EZ6Vdw7xStdg
+; xbIzhWK3wpCTG8W6zOaNDsstFcH-wXiQp1pHkCkSxLE
+
+(expect "Start a rental with only KDA in the users wallet"
+  "A 97 day rental has been started with a hashrate of 7.447. Your rental ID is: 0 "
+  (free.chips.start-rental "bob" "cKDA" 0.0 "KDA" 100.0 90 "alice"))
+(expect "get-mined-for-lock"
+  0.00
+  (free.chips.get-mined-for-lock "0" "KDA"))
+(commit-tx)
+
+
+(begin-tx "start a rental with cTokens and KDA in the users wallet")
+(env-sigs [ { "key": "bob-key", "caps":
+ [(coin.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.kWATT.TRANSFER "bob" "chips-locked-wallet" 10000.0)
+  (free.cKDA.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.chips.ACCOUNT_GUARD "bob")] } ])
+(expect "Start rental success"
+  "A 97 day rental has been started with a hashrate of 10.000. Your rental ID is: 1 "
+  (free.chips.start-rental "bob" "cKDA" 10.0 "KDA" 752.27 90 "bob"))
+
+
+
+; @dev rent function is for after our own pool is built - it allows the direct assignment of specific machinery and performance to a user via the chips-policy contract
+; (free.chips.rent
+;   "bob"
+;   [ { "hashrate": 38, "count": 2 },
+;   { "hashrate": 19.1, "count": 1 },
+;   { "hashrate": 11.5, "count": 0 },
+;   { "hashrate": 3.8, "count": 0 },
+;   { "hashrate": 0.76, "count": 3 } ]
+;
+;   [ { "hashrate": 19.1, "count": 3 },
+;   { "hashrate": 11.5, "count": 3 },
+;   { "hashrate": 3.8, "count": 1 },
+;   { "hashrate": 0.76, "count": 3 } ]
+;
+;   [
+;     {
+;       "hashrate": 38.0, ;38 + 38 + 19.1 + 0.76 + 0.76 + 0.76 ; 725 + 725 + 363 + 15 + 15 + 15
+;       "tokens": [
+;         "t:V2ZGLTxz4aSfZfYqfvftjFxz1jPWY4Cz66t3_yiS1PY",
+;         "t:ViXDebtHfnNW_APQCl0yeipV8CrAKOUT0fj4UuiUR08",
+;         "t:lvlouLfYeFj59Clmia6yDdkObZRuNeta9naPHgyqaZE"
+;       ]
+;     },
+;     {
+;       "hashrate": 19.1,
+;       "tokens": [
+;         "t:7SysqczPBtV3Gi7FepVcvvVjChRieet6P-q4jwsR4uw",
+;         "t:IPiBxVeb3gmZZOQInkC9tk6EYNga-qrSKwwnZhGalUo",
+;         "t:uju9Ctsbxa8j8gu0UF0aUP1fXG_oe1HGCVdGL3RDuHY"
+;       ]
+;     },
+;     {
+;       "hashrate": 11.5,
+;       "tokens": [
+;         "t:OL1IYUlbCMeuIXTAvwsNc5K9_tSZtHzITdbdHTqCltY",
+;         "t:Qh-1qf629WUH7hChpgZNKTv8FhyA1carmZWdMM0K-zE",
+;         "t:wDUiNjihomKC79BObAKbu8rsOUM1y61AZlaLWeN_lGo"
+;       ]
+;     },
+;     {
+;       "hashrate": 3.8,
+;       "tokens": [
+;         "t:D7g1Z9hzqMw5RQf9G5DBaufPczjw-xPin1pOQs37mNw",
+;         "t:RkNHVDikeY_4FTPJfSwZ4-qhfLA4XXtDITgkmpmD-NY",
+;         "t:f_QphwuWjd9P7v_vWLCnAPTpJpRl9_BUvT4OPTqgonY",
+;         "t:gRR8CVHLNcHIEtIONAKneBASUlu4e2ZKsvKI0YrUhOU",
+;         "t:s7ZEpm1XHcfEc-IejGanrvTrF8ciq7e8v19Db4-9S3w"
+;       ]
+;     },
+;     {
+;       "hashrate": 0.76,
+;       "tokens": [
+;         "t:8mH1_BhCaFrAyEAkroSX1Vi6UijjpQAzXplWGE3r74c",
+;         "t:kLM7ekFK3ZD-WNcRFMuXbajMzMqQjTu_hMbTKtjreZg",
+;         "t:nLvLrjarj8-RnrJz-Kf_QU0XRjn3FEC8BBGIDeDDKT0",
+;         "t:x-gKPRwhpOkT_pu388ZBGOT2FKPeSyfDPeVqFZ5n1GM"
+;       ]
+;     }
+;   ]
+;   90
+; )
+(expect "get remaining days"
+  96.972222
+  (free.chips.get-days-remaining-in-lock "0"))
+(expect "cKDA balance has gone down"
+  9990.0
+  (free.cKDA.get-balance "bob"))
+(expect "Read lock data"
+  {"account": "bob","cTokens": 7.4472008852,"cType": "cKDA","change-index": 0,"chip-ids": [],"coin": "KDA","coins-owed": 0.0,"degradation": false,"duration": 97,"end-time": (time "2024-06-16T03:00:00Z"),"extra": {}, "hashrate": 7.447, "kWatts": 306.07995638172,"lock-number": "0","mined-index": "KDA:1710122400","released": false,"start-time": (time "2024-03-11T03:40:00Z")}
+  (free.chips.read-lock "0"))
+(env-gas)
+(commit-tx)
+
+
+; mainnet request keys for extending a rental
+; SJvhmFN9IgQPmuSb7Ljkdsl8rCVQN5ZdI17BCTDnyus
+; WcFbpXKEF9wKIfhQ-sDT6UtYC9lC_yNkXRwxvUeEMTQ
+(begin-tx "extend rental")
+; the goal of this function is to calculate the require payment-tokens-needed for a specific amount of days
+(expect "calculations for extending a rental"
+  {"total-cost": 21.12379427,"total-kWATTs-required": 306.07995638172,"kWATTs-per-day": 3.400888,"payment-tokens-needed": 45.48620644,"cost-per-kWATT": 0.0690,"cost-per-day": 0.23470883,"duration-discount-precalc": 0.00000000,"lock-data": {"account": "bob","cTokens": 7.4472008852,"cType": "cKDA","change-index": 0,"chip-ids": [],"coin": "KDA","coins-owed": 0.0,"degradation": false,"duration": 97,"end-time": (time "2024-06-16T03:00:00Z"),"extra": {},"hashrate": 7.447,"kWatts": 306.07995638172,"lock-number": "0","mined-index": "KDA:1710122400","released": false,"start-time": (time "2024-03-11T03:40:00Z")},"payment-token-price": 0.4644}
+  (free.chips.gather-extend-expense2 "bob" "KDA" false "0" 90))
+
+(expect "extend rental success"
+  "Rental extended by 90 days and will end on \"2024-09-14T03:00:00Z\". Locked 306.0800 kWatts."
+  (free.chips.extend-one-rental "bob" "0" false "KDA" 45.48620644 90 "me"))
+(commit-tx)
+
+(begin-tx "Extend rental by too many days")
+(expect "get payment tokens required"
+  174.25609264
+  (at 'payment-tokens-needed (free.chips.gather-extend-expense2 "bob" "KDA" false "0" 366)))
+
+(expect-failure "too long of an extension. No more than 365 days"
+ "Largest extension is 365 days"
+ (free.chips.extend-one-rental "bob" "0" false "KDA" 175.0 366 "me"))
+(commit-tx)
+
+
+(begin-tx "simulate further mining now that rentals have been started")
+(env-sigs [ { "key": "alice-key", "caps": []}])
+
+(free.chips.insert-coin-mined "KDA" 10.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-11T04:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 15.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-11T05:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 16.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-11T06:00:00Z")})
+(expect "get-mined-for-lock"
+  0.01004412 ; very small amount mined due to very large hashrate (5100 TH/s)
+  (free.chips.get-mined-for-lock "0" "KDA"))
+(commit-tx)
+
+
+; mainnet request key example
+; _YYs5a2jKbKeFq-xCKLVygmtBdfTWp1_czQ_8xt6DYE
+(begin-tx "Change the total hashrate available for an algorithm")
+(expect "change total hashrate"
+  "previous-data: {\"coin\": \"KDA\",\"divisor\": [5190.0],\"mined\": 16.0,\"previous\": [0],\"submitted-at\": \"2024-03-11T05:00:00Z\",\"total-hashrate\": 5190.0}, New hashrate total: 5482.14, new previous list: [16.0, 0], new divisor: [5190.0, 5190.0]"
+  (free.chips.change-total-hashrate 292.14 "KDA")) ;doubling the initial hashrate
+(commit-tx)
+
+(begin-tx "start another rental now that mining has changed")
+(env-sigs [ { "key": "bob-key", "caps":
+ [(coin.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.kWATT.TRANSFER "bob" "chips-locked-wallet" 10000.0)
+  (free.cKDA.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.chips.ACCOUNT_GUARD "bob")] } ])
+
+(env-chain-data { "block-time": (time "2024-03-11T03:40:00Z")})
+(expect "rental started"
+  "A 97 day rental has been started with a hashrate of 0.745. Your rental ID is: 3 "
+  (free.chips.start-rental "bob" "cKDA" 0.0 "KDA" 10.0 90 "alice"))
+(commit-tx)
+
+
+(begin-tx "simulate more mining now that the total available hashrate has changed")
+(env-sigs [ { "key": "alice-key", "caps": []}])
+(env-chain-data { "block-time": (time "2024-03-11T07:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 20.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-11T08:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 23.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-13T09:00:00Z")})
+(free.chips.insert-coin-mined "KDA" 25.0 "alice")
+(env-chain-data { "block-time": (time "2024-03-17T03:45:11Z")})
+(free.chips.insert-coin-mined "KDA" 27.33 "alice")
+(expect "get-mined-for-lock"
+  0.02543492 ; very small amount mined due to very large hashrate (5100 TH/s)
+  (free.chips.get-mined-for-lock "0" "KDA"))
+(commit-tx)
+
+(begin-tx)
+(expect "read currency table"
+  [{"fungible": free.cBTC} {"fungible": free.cKDA} {"fungible": free.cLTC} {"fungible": free.kWATT}]
+  (free.chips.get-currency-table))
+(commit-tx)
+
+(env-gaslimit 150000)
+(begin-tx "check balances of contract and user funds")
+(free.chips.pretty-read-all-user-locks "bob")
+(free.chips.get-user-locks-data "bob")
+(env-sigs [ { "key": "alice-key", "caps": [] }])
+
+(expect "get balance"
+  907.75630644
+  (coin.get-balance "chips-bank"))
+
+(expect "get kWATT balance"
+  2000.0
+  (free.kWATT.get-balance "chips-bank"))
+
+; mainnet request keys for claiming
+; qtswffqvOGuHUdLByj0AkbU0W1jGb9iTs83avwZQ6xY
+; 5bXD-5bY7PSIPCfHJsZ1o8LlIUcjJcE33nOyhjP8AFU
+(expect-failure "alice user trying to claim bob's rewards"
+  "Keyset failure (keys-all): [bob-key]"
+  (free.chips.claim-multiple "bob" [""] ["1"]))
+
+(expect "get the amount mined for a rental"
+  0.02543492
+  (free.chips.get-mined-for-lock "0" "KDA"))
+
+
+(free.chips.get-user-locks-data "bob")
+(env-gas)
+(commit-tx)
+
+(env-sigs [ { "key": "alice-key", "caps": []}])
+(begin-tx "add a large amount of KDA, check that bobs claims are empty")
+(env-chain-data { "block-time": (time "2024-03-17T06:25:11Z")})
+(free.chips.insert-coin-mined "KDA" 127.33 "alice")
+(expect "get-mined-for-lock"
+  0.16127603
+  (free.chips.get-mined-for-lock "0" "KDA"))
+
+(expect "check bobs claims"
+  []
+  (free.chips.get-claimed "bob"))
+(commit-tx)
+
+(begin-tx "prepare for Litecoin + Dogecoin merged mining")
+(env-sigs [ { "key": "alice-key", "caps": []}])
+(env-chain-data { "block-time": (time "2024-03-17T02:25:11Z")})
+(free.chips.insert-coin-mined "LTC" 0.0 "alice")
+(free.chips.insert-coin-mined "DOGE" 0.0 "alice")
+(commit-tx)
+
+(begin-tx "start a cLTC rental")
+(env-sigs [ { "key": "bob-key", "caps":
+ [(coin.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.kWATT.TRANSFER "bob" "chips-locked-wallet" 10000.0)
+  (free.cKDA.TRANSFER "bob" "chips-bank" 10000.0)
+  (free.chips.ACCOUNT_GUARD "bob")] } ])
+(env-chain-data { "block-time": (time "2024-03-11T03:40:00Z")})
+
+(expect "starting a cLTC rental"
+  "A 97 day rental has been started with a hashrate of 0.588. Your rental ID is: 4 "
+  (free.chips.start-rental "bob" "cLTC" 0.0 "KDA" 100.0 90 "alice"))
+
+(expect "no currency mined yet"
+  0.0
+  (free.chips.get-mined-for-lock "3" "LTC"))
+(commit-tx)
+
+(begin-tx "insert LTC and DOGE earnings")
+(env-sigs [ { "key": "alice-key", "caps": []}])
+(env-chain-data { "block-time": (time "2024-03-17T07:25:11Z")})
+(free.chips.insert-coin-mined "LTC" 1.33 "alice")
+(free.chips.insert-coin-mined "DOGE" 312.01 "alice")
+(expect "get LTC earnings"
+  0.00230012
+  (free.chips.get-mined-for-lock "3" "LTC"))
+
+(expect "get DOGE earnings"
+  0.53959376
+  (free.chips.get-mined-for-lock "3" "DOGE"))
+
+(commit-tx)
+
+(begin-tx "Bob claims from LTC lock")
+(env-sigs [ { "key": "bob-key", "caps": [] }])
+(expect "claim success"
+  {"on-chain": [],"external": ["Claimed 0.00230012 LTC and 0.53959376 DOGE. These coins will be sent to your provided addresses as soon as this transaction is picked up by the Chips oracle. This can take up to 30 minutes."]}
+  (free.chips.claim-multiple "bob" ["x1" "x2"] ["3"]))
+
+(expect "get claimed history for bob"
+  0.53959376
+  (at 'claimed (at 0 (free.chips.get-claimed "bob"))))
+
+(expect "test sum claims"
+  {"total-claimed": 0.00230012,"coin-price": 102.99}
+  (free.chips.sum-claims "3" "LTC"))
+(commit-tx)
+
+(begin-tx "claim from a rental with nothing to claim")
+(expect "nothing to claim"
+  {"on-chain": [],"external": []}
+  (free.chips.claim-multiple "bob" ["x1" "x2"] ["3"]))
+
+(commit-tx)
+
+;
+(begin-tx "print data to console and claim from two locks at once")
+(env-sigs [ { "key": "bob-key", "caps": [] }])
+(free.chips.claim-multiple "bob" [] ["0" "1"])
+(free.chips.get-claimed "bob")
+(free.chips.get-mineable-coins)
+(free.chips.read-lock "0")
+(free.chips.pretty-read-lock "0")
+(free.chips.get-mined-for-lock "KDA" "KDA")
+(free.chips.calculate-apr "KDA")
+(free.chips.read-lock "KDA")
+;"2024-03-17T03:25:11Z" recorded-time
+; "2024-03-10T04:00:00Z" previous-time
+(commit-tx)
+
+(begin-tx "test kWATT minting function")
+(env-sigs [{"key": "chips-signatory", "caps": [(free.kWATT.MINT "chips-signatory" 1.0)]}])
+(env-data {
+  "chips-signatory": { "keys": ["chips-signatory"], "pred": "keys-all" }
+})
+(expect "get kWATT balance"
+  230000.0
+  (free.kWATT.get-balance "chips-signatory"))
+
+(expect "mint kWATT"
+  "Write succeeded"
+  (free.kWATT.mint "chips-signatory" 1.0 ))
+(expect "get kWATT balance"
+  230001.0
+  (free.kWATT.get-balance "chips-signatory"))
+(commit-tx)
+
+(begin-tx "test kWATT burning function")
+(env-sigs [{"key": "chips-signatory", "caps": [(free.kWATT.BURN "chips-signatory" 0.1)]}])
+
+(expect "burn kWATT"
+  "Write succeeded"
+  (free.kWATT.burn "chips-signatory" 0.1))
+(expect "get kWATT balance"
+  230000.9
+  (free.kWATT.get-balance "chips-signatory"))
+(commit-tx)
+
+(begin-tx "start a rental with a currency not deployed on the Kadena blockchain")
+; @dev the user submits a transaction with their EVM wallet and pays an ethereum/polygon contract
+; an oracle is scanning for transactions from the ethereum/polygon contract and calls the start-rental function on the users behalf
+(env-sigs [ { "key": "alice-key", "caps": [
+  (free.chips.ACCOUNT_GUARD "alice") ]}])
+(free.chips.start-rental "dave" "cLTC" 0.0 "BTC" 0.01 30 "alice")
+(commit-tx)
+;; //front-end functions
+(begin-tx)
+(free.chips.get-marketplace-details)
+(free.chips.admin-withdraw-from-bank free.cBTC 1.0)
+(free.chips.get-tvl)
+(free.chips.get-all-unclaimed-rewards)
+(commit-tx)
+
+(env-gas 0)
+(begin-tx "get discounts for users based on promotions")
+(free.cBTC.get-balance "bob")
+(free.chips.get-user-applied-discount "bob")
+(env-gas)
+(commit-tx)
+
+
+; mainnet request keys for withdraw-from-lock
+; Ha_VJvIRdNIJsBS9DAdjT7XRTs8Ml_b0MqKA4FV3Ahk
+; HyVyxaask5YY2iw2UndCtF7MRc0v4CCVUGMfdq86a4I
+
+(begin-tx "failed withdraw due to wrong keyset")
+(env-sigs [ { "key": "dave-key", "caps": [] }])
+(expect-failure "wrong keyset"
+  "Keyset failure (keys-all): [bob-key]"
+  (free.chips.withdraw-from-lock "bob" [] "1"))
+(commit-tx)
+
+(begin-tx "failed withdraw due to wrong keyset and lock owner")
+(env-sigs [ { "key": "dave-key", "caps": [] }])
+(expect-failure "wrong keyset"
+  "You are not the owner of this lock. Permission denied."
+  (free.chips.withdraw-from-lock "dave" [] "1"))
+(commit-tx)
+
+(begin-tx "withdraw from a rental")
+(env-sigs [ { "key": "bob-key", "caps": [] }])
+(free.chips.poll-balances "bob")
+(expect "withdrawn"
+  true
+  (free.chips.withdraw-from-lock "bob" [] "1"))
+
+(commit-tx)
