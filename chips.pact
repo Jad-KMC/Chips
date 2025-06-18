@@ -7,6 +7,8 @@
 
 ; SECTION 2: NFT-based assignment of computational resources
 ;   `chips-policy` smart contract is where all of the NFT data is stored. New NFTs are generated when new machines are acquired`
+;     the change-total-hashrate function expects one policy per algorithm. New policies must be deployed to accomodate new algorithms
+;     It is expected that the policy is updated with NFT data before change-total-hashrate is called
 
 ; SECTION 3: Token-based rental payments
 ; RENTALS
@@ -54,6 +56,8 @@
   (defconst ADMIN_ADDRESS "alice")
   (defconst BRIDGE_ORACLE_ADDRESS "alice")
   (defconst ADMIN_KEYSET "n_62231f26f11dab92b868875810a4aaa5af13db61.chips-admin")
+  (defconst MINIMUM_ENERGY_PRICE 0.061)
+  (defconst BTC_ENERGY_PRICE 0.07)
   ; (defconst )
   (defschema counts-schema
     count:integer
@@ -118,6 +122,8 @@
     kWATT-cost:decimal
     cType:string
     date:time
+    lock-id:string
+    end-time:time
   )
 
   (defschema user-locks-schema
@@ -158,6 +164,11 @@
     recent:string
   )
 
+  (defschema lock-name-schema
+    @doc "Allows a user to name their rental"
+    name:string
+  )
+
   (deftable counts-table:{counts-schema})
   (deftable user-locks-table:{user-locks-schema})
   (deftable locks-table:{lock-schema})
@@ -170,6 +181,7 @@
   (deftable historic-apr-table:{historic-apr-schema})
   (deftable transaction-table:{transaction-schema})
   (deftable external-claim-table:{external-claim-schema})
+  (deftable lock-name-table:{lock-name-schema})
 
   (defun initialize ()
     (insert counts-table CLAIM_COUNT { "count" : 0 })
@@ -315,7 +327,7 @@
         (let* (
             (previous-mined-index (get-recent coin))
             (new-mined-index (format-time "%s" (time (format-time "%Y-%m-%dT%H:00:00Z" (at 'block-time (chain-data))))) )
-            (previous-data (read-mined coin previous-mined-index))
+            (previous-data (read-mined previous-mined-index))
           )
           (enforce (>= mined (at 'mined previous-data)) "Error: the amount mined cannot go down")
           (insert mined-table (format "{}:{}" [coin new-mined-index])
@@ -342,7 +354,7 @@
       (let* (
           (mined-index (get-recent cType))
           (new-mined-index (format-time "%s" (time (format-time "%Y-%m-%dT%H:00:01Z" (at 'block-time (chain-data))))) )
-          (previous-data (read-mined cType mined-index))
+          (previous-data (read-mined mined-index))
           (new-hashrate (+ additional-hashrate (at 'total-hashrate previous-data)))
           (new-previous (+ [(- (at 'mined previous-data) (fold (+) 0.0 (at 'previous previous-data)))] (at 'previous previous-data)))
           (new-divisor (+ (at 'divisor previous-data) [(at 'total-hashrate previous-data)]))
@@ -425,7 +437,7 @@
       )
       ;
       (enforce (= false (at 'released lock-data)) "This lock is expired and there are no claimable rewards")
-      (if (= is-expired true) (with-capability (PRIVATE) (close-out-lock lock-id lock-data account)) "")
+      (if (= is-expired true) (with-capability (PRIVATE) (withdraw-from-lock account external-account lock-id)) "")
       (if (> total 0.0)
         (with-capability (CLAIM account lock-id)
           (if (= coin "LTC")
@@ -515,54 +527,111 @@
   (defun get-mined-for-lock (lock-id:string coin:string)
     (let* (
         (lock-data (read locks-table lock-id))
-        (previously-mined (at 'coins-owed lock-data)) ;0.0
-        (lock-change-index (at 'change-index lock-data)) ;1
+        (previously-mined (at 'coins-owed lock-data))
+        (lock-change-index (at 'change-index lock-data))
         (mined-index-LTC (if (= "DOGE" coin)
                             (+ "DOGE" (drop 3 (at 'mined-index lock-data)))
                             (at 'mined-index lock-data)
                             ))
-        (mined-index-start mined-index-LTC) 
+        (mined-index-start mined-index-LTC)
         (mined-index-end (if (< (at 'end-time lock-data) (at 'block-time (chain-data)))
                             (decide-end-index (at 'end-time lock-data) coin)
                             (get-recent coin)
                           ) )
-        (start-mined-data (read-mined mined-index-start)) 
-        (recent-mined-data (read-mined mined-index-end)) 
-        (recent-change-index (get-count (format "{}-change-index" [(at 'coin lock-data)])) ) ; 2
-        (previous (at 'previous recent-mined-data)) 
-        (divisor (at 'divisor recent-mined-data)) 
+        (start-mined-data (read-mined mined-index-start))
+        (recent-mined-data (read-mined mined-index-end)) ;most recent information from the mined-table
+        (recent-change-index (get-count (format "{}-change-index" [(at 'coin lock-data)])) )
+        (previous (at 'previous recent-mined-data)) ;list
+        (divisor (at 'divisor recent-mined-data)) ;list
         (lock-hashrate (at 'hashrate lock-data))
-        (mined-at-first-addition (fold (+) 0.0 (drop (- (length previous) (+ lock-change-index 2)) previous)))
 
-        ; total if the rental spans across only one index
-        (total1 (if (= lock-change-index recent-change-index)
-          (* (- (at 'mined recent-mined-data) (at 'mined start-mined-data)) (/ lock-hashrate (at 'total-hashrate start-mined-data)))
-          0.0))
-
-        ; Total mined for the first index
-        (first-calc (* (- mined-at-first-addition (at 'mined start-mined-data)) (/ lock-hashrate (at 'total-hashrate start-mined-data))))
-
-        ; total mined for every index between the first and last.
-        (cascading (if (> (- recent-change-index lock-change-index) 1)
-          (fold (+) 0.0 (map (cascading-helper lock-hashrate previous divisor) (enumerate (+ lock-change-index 1) (- recent-change-index 1))))
-          0.0) )
-
-        ; total mined for the last index
-        (last-calc (* (- (at 'mined recent-mined-data) (fold (+) 0.0 previous)) (/ lock-hashrate (at 'total-hashrate recent-mined-data))))
-        (total (if (= 0.0 total1)
-          (+ (+ first-calc cascading) last-calc)
-          total1))
-        (adjusted-total (if (= "LTC" coin) (* total 10) total))
+        ; all calculations account for the users proportion of the hashrate
+        (cascading (fold (+) 0.0 (map (cascading-helper lock-hashrate previous divisor) (enumerate lock-change-index recent-change-index))) )
+        (first-calc (* (at 'mined start-mined-data) (/ lock-hashrate (at 'total-hashrate start-mined-data))) )
+        (last-calc (* (- (at 'mined recent-mined-data) (fold (+) 0.0 (drop lock-change-index previous))) (/ lock-hashrate (at 'total-hashrate recent-mined-data))) )
+        (total (round (+ (- cascading first-calc) last-calc) 8) )
       )
       (if (at 'released lock-data)
         0
-        (+ (round adjusted-total 8) previously-mined))
+        (+ total previously-mined))
     )
   )
 
-  (defun cascading-helper (lock-hashrate:decimal previous:list divisor:list index:integer)
-    (* (at index previous) (/ lock-hashrate (at (+ index 1) divisor)))
-  ) 
+  (defun extend-one-rental (account:string lock-id:string use-kWATTs:bool payment-token:string payment-token-amount:decimal extend-by-days:integer caller:string)
+    @doc "Allows a user to extend the duration of their lock by a number of days"
+    (with-capability (ACCOUNT_GUARD account)
+      (let* (
+          (calculations (gather-extend-expense2 account payment-token false lock-id extend-by-days))
+          (lock-data (at 'lock-data calculations))
+          (cType (at 'cType lock-data))
+          (cTokens-locked (at 'cTokens lock-data))
+          (dollar-value-of-payment (* (at 'payment-token-price calculations) payment-token-amount))
+          (new-days-afforded (str-to-int (drop -2 (format "{}" [(round (/ dollar-value-of-payment (at 'cost-per-day calculations)) 0)]))))
+          (end-time (add-time (at 'end-time lock-data) (days new-days-afforded)))
+          (kWatts-per-day (/ (chips-presale.calculate-kWatts-required cTokens-locked cType) 30))
+          (new-kWatts-required (round (* kWatts-per-day new-days-afforded) 4))
+          (orders-count-string (int-to-str 10 (get-count ORDERS_COUNT)))
+          ; end here
+          (kwatt:module{fungible-v2} (at 'fungible (read currency-table "kWATT")))
+        )
+        (enforce (< (at "block-time" (chain-data)) (at 'end-time lock-data)) "You cannot extend a lock that has expired, please start a new lock")
+        (enforce (>= new-days-afforded 1) "Smallest extension is 1 day")
+        (enforce (<= new-days-afforded 365) "Largest extension is 365 days")
+        (if (= "KDA" payment-token)
+          (coin.transfer account CHIPS_BANK payment-token-amount)
+          (with-capability (ADMIN_OR_BRIDGE caller)
+            "bridge"
+          )
+        )
+        (update locks-table lock-id
+          { "duration" : (+ (at 'duration lock-data) new-days-afforded)
+          , "end-time" : end-time
+          , "kWatts" : (+ (at 'kWatts lock-data) new-kWatts-required) } )
+        (with-capability (PRIVATE)
+          (update-transaction-table orders-count-string account payment-token payment-token-amount
+            (at 'payment-token-price calculations) 0.0 0.0 new-kWatts-required dollar-value-of-payment "none" lock-id end-time)
+          (mint-kWATT CHIPS_LOCKED_WALLET new-kWatts-required)
+          (update-tvl kWATT_TVL new-kWatts-required))
+        (format "Rental extended by {} days and will end on {}. Locked {} kWatts." [new-days-afforded end-time new-kWatts-required])
+      )
+    )
+  )
+
+  (defun gather-extend-expense2 (account:string payment-token:string use-kWATTs:bool lock-id:string extend-by-days:integer)
+    (let* (
+        (lock-data (read locks-table lock-id))
+        (cType (at 'cType lock-data))
+        (cTokens-locked (at 'cTokens lock-data))
+        (duration-discount (if (> extend-by-days 365) 0.05 (* (/ (- extend-by-days 90) 275.0) 0.05)))
+        (payment-token-price (chips-oracle.get-current-price payment-token))
+        (user-kWATT-discount (get-user-applied-discount account)) ;% discount
+        (user-kmc-discount (* 0.125 (* 0.005 (chips-presale.get-kmc-nft-count account)) )) ;1/200 for a max of 0.125% discount
+        (combined-user-discount (+ (if (> user-kmc-discount 0.125) 0.125 user-kmc-discount) user-kWATT-discount)) ; 12.5%. max
+        (kWATTs-per-day-per-cToken (/ (chips-presale.calculate-kWatts-required 1.0 cType) 30))
+        (total-kWATTs-required-per-cToken (round (* extend-by-days kWATTs-per-day-per-cToken) 6))
+        (kWATT-price (chips-oracle.get-current-price "kWATT"))
+        (kWATT-adjusted-price (if (= cType "cBTC") BTC_ENERGY_PRICE kWATT-price))
+        (cost-per-kWATT (* kWATT-adjusted-price (- 1 (+ (+ combined-user-discount duration-discount) 0.03))))
+        (adjusted-cost-per-kWATT (if (< cost-per-kWATT MINIMUM_ENERGY_PRICE) MINIMUM_ENERGY_PRICE cost-per-kWATT)) ;0.061 absolute minimum including promos
+        (kWATT-cost-per-cToken (* adjusted-cost-per-kWATT total-kWATTs-required-per-cToken ))
+        (kWATT-cost (round (* cTokens-locked kWATT-cost-per-cToken) 8))
+        (purchase-details (chips-presale.get-kwatts-and-power cTokens-locked cType))
+        (hashrate (at 'power purchase-details))
+        (rewards (at 'rewards purchase-details))
+        (total-kWATTs-required  (* total-kWATTs-required-per-cToken cTokens-locked))
+      )
+      { "total-cost" : kWATT-cost
+      , "total-kWATTs-required" : total-kWATTs-required
+      , "kWATTs-per-day" : (round (/ total-kWATTs-required extend-by-days) 6)
+      , "payment-tokens-needed" : (round (/ kWATT-cost payment-token-price) 8)
+      , "cost-per-kWATT" : (round adjusted-cost-per-kWATT 4)
+      , "cost-per-day" : (round (/ kWATT-cost extend-by-days) 8)
+      , "duration-discount-precalc" : (round duration-discount 8)
+      , "lock-data" : lock-data
+      , "payment-token-price" : payment-token-price
+      }
+    )
+  )
 
   (defun get-all-unclaimed-rewards ()
     @doc "For accounting purposes, return the entire reward balance owed to Chips customers"
@@ -588,6 +657,23 @@
     )
   )
 
+  (defun migrate-icBTC (account:string cType:string cToken-amount:decimal rental-duration:integer previously-mined:decimal caller:string)
+    (let* (
+        (hashrate cToken-amount)
+        (total-kWATTs-required (* (* 0.45 rental-duration) cToken-amount))
+        (orders-count-string (int-to-str 10 (get-count ORDERS_COUNT)))
+        (cToken-module:module{fungible-v2} (at 'fungible (read currency-table cType)))
+      )
+      (with-capability (PRIVATE)
+        (increase-count ORDERS_COUNT)
+        (mint-kWATT CHIPS_LOCKED_WALLET (round total-kWATTs-required 8))
+        (order-work cType cToken-amount)
+        (create-lock total-kWATTs-required cToken-amount account rental-duration hashrate (drop 1 cType) cType previously-mined)
+        (format "A {} day {} rental has been started on behalf of {} with a hashrate of {}. Previously-mined: {}. The rental ID is: {} " [rental-duration cType account hashrate previously-mined orders-count-string])
+      )
+    )
+  )
+
   (defun get-unclaimed-for-lock (lock-id:string)
     @doc "Returns the total amount of rewards unclaimed for a rental"
     (let* (
@@ -597,6 +683,10 @@
       )
       { "coin" : (at 'coin lock-data), "rewards" : rewards , "DOGE" : DOGE-rewards }
     )
+  )
+
+  (defun cascading-helper (lock-hashrate:decimal previous:list divisor:list index:integer)
+    (* (at index previous) (/ lock-hashrate (at index divisor)))
   )
 
   (defun decide-end-index (end-time:time coin:string)
@@ -655,11 +745,13 @@
     (let* (
         (minimum-rental-duration (get-count MINIMUM_LOCK_DURATION))
         (purchase-details (gather-purchase-details account cType cToken-amount payment-token payment-token-amount rental-duration))
-        (rental-duration-bonus (str-to-int (drop -2 (format "{}" [(round (* 0.07777777778 rental-duration) 0)])))) ; 1 week per 3 month duration bonus
+        (rental-duration-bonus (str-to-int (drop -2 (format "{}" [(round (* 0.07777777778 rental-duration) 0)]))))
+
         (total-cTokens-locked (at 'total-cTokens-locked purchase-details))
         (hashrate (at 'hashrate purchase-details))
         (orders-count-string (int-to-str 10 (get-count ORDERS_COUNT)))
         (cToken-module:module{fungible-v2} (at 'fungible (read currency-table cType)))
+        (end-time (time (format-time "%Y-%m-%dT%H:00:00Z" (add-time (at 'block-time (chain-data)) (days rental-duration)))))
       )
       (enforce (>= rental-duration minimum-rental-duration) (format "Your rental must be at least {} days" [minimum-rental-duration]))
       (enforce (<= rental-duration 365) (format "Maximum rental duration is 365 days"))
@@ -672,7 +764,8 @@
       (if (> cToken-amount 0.0) (cToken-module::transfer account CHIPS_BANK cToken-amount) "")
       (with-capability (PRIVATE)
         (update-transaction-table orders-count-string account payment-token payment-token-amount (at 'payment-token-price purchase-details)
-          (at 'cTokens-purchased purchase-details) (at 'cTokens-usd-price purchase-details) (at 'total-kWATTs-required purchase-details) (at 'total-kWATT-cost purchase-details) cType)
+          (at 'cTokens-purchased purchase-details) (at 'cTokens-usd-price purchase-details) (at 'total-kWATTs-required purchase-details)
+          (at 'total-kWATT-cost purchase-details) cType orders-count-string end-time)
         (mint-kWATT CHIPS_LOCKED_WALLET (round (at 'total-kWATTs-required purchase-details) 8))
         (order-work cType total-cTokens-locked)
         (create-lock (at 'total-kWATTs-required purchase-details) total-cTokens-locked account (+ rental-duration rental-duration-bonus) hashrate (drop 1 cType) cType 0.0)
@@ -681,52 +774,9 @@
     )
   )
 
-  (defun extend-rental (account:string lock-id:string use-kWATTs:bool payment-token:string payment-token-amount:decimal caller:string)
-    @doc "Allows a user to extend the duration of their lock by a number of days"
-    (with-capability (ACCOUNT_GUARD account)
-      (let* (
-          (lock-data (read locks-table lock-id))
-          (cType (at 'cType lock-data))
-          (cTokens-locked (at 'cTokens lock-data))
-          (duration (at 'duration lock-data))
-          (duration-discount-precalc (* (/ (- duration 90) 275.0) 0.05))
-          (duration-discount (if (> duration-discount-precalc 375.0) 0.05 duration-discount-precalc))
-          (payment-token-price (chips-oracle.get-current-price payment-token))
-          (user-kWATT-discount (chips-presale.get-user-applied-discount account))
-          (kWatts-per-day (/ (chips-presale.calculate-kWatts-required cTokens-locked cType) 30))
-          (cost-per-kWATT (* (chips-oracle.get-current-price "kWATT") (- 1 (+ user-kWATT-discount duration-discount))))
-          (cost-per-day (round (* cost-per-kWATT kWatts-per-day) 6))
-          (dollar-value-of-payment (* payment-token-price payment-token-amount))
-          (new-days-afforded (str-to-int (drop -2 (format "{}" [(round (/ dollar-value-of-payment cost-per-day) 0)]))))
-          (end-time (add-time (at 'end-time lock-data) (days new-days-afforded)))
-          (new-kWatts-required (round (* kWatts-per-day new-days-afforded) 3))
-          (orders-count-string (int-to-str 10 (get-count ORDERS_COUNT)))
-          ; end here
-          (kwatt:module{fungible-v2} (at 'fungible (read currency-table "kWATT")))
-        )
-        (enforce (< (at "block-time" (chain-data)) (at 'end-time lock-data)) "You cannot extend a lock that has expired, please start a new lock")
-        (enforce (>= new-days-afforded 1) "Smallest extension is 1 day")
-        (if (= "KDA" payment-token)
-          (coin.transfer account CHIPS_BANK payment-token-amount)
-          (with-capability (ADMIN_OR_BRIDGE caller)
-            "bridge"
-          )
-        )
-
-        (update locks-table lock-id
-          { "duration" : (+ duration new-days-afforded)
-          , "end-time" : end-time
-          , "kWatts" : (+ (at 'kWatts lock-data) new-kWatts-required) } )
-        (with-capability (PRIVATE)
-          (update-transaction-table orders-count-string account payment-token payment-token-amount payment-token-price 0.0 0.0 new-kWatts-required dollar-value-of-payment "none")
-          (mint-kWATT CHIPS_LOCKED_WALLET (round (* kWatts-per-day new-days-afforded) 8))
-          (update-tvl kWATT_TVL new-kWatts-required))
-        (format "Rental extended by {} days and will end on {}. Locked {} kWatts." [new-days-afforded end-time new-kWatts-required])
-      )
-    )
-  )
-
-  (defun update-transaction-table (orders-count:string account:string payment-token:string payment-token-amount:decimal payment-token-price:decimal cTokens-sold:decimal cTokens-usd-price:decimal kWATTs-sold:decimal kWATT-cost:decimal cType:string)
+  (defun update-transaction-table (orders-count:string account:string payment-token:string payment-token-amount:decimal
+    payment-token-price:decimal cTokens-sold:decimal cTokens-usd-price:decimal kWATTs-sold:decimal kWATT-cost:decimal
+    cType:string lock-id:string end-time:time)
     (require-capability (PRIVATE))
     (insert transaction-table orders-count
       { "account" : account
@@ -738,62 +788,76 @@
       , "kWATTs-sold" : (round kWATTs-sold 6)
       , "kWATT-cost" : kWATT-cost
       , "cType" : cType
-      , "date" : (at 'block-time (chain-data)) })
+      , "date" : (at 'block-time (chain-data))
+      , "lock-id" : lock-id
+      , "end-time" : end-time })
       (increase-count ORDERS_COUNT)
   )
 
-  (defun gather-extend-expense (account:string payment-token:string use-kWATTs:bool lock-id:string extend-by-days:integer)
-    (let* (
-        (lock-data (read locks-table lock-id))
-        (cType (at 'cType lock-data))
-        (cTokens-locked (at 'cTokens lock-data))
-        (duration (at 'duration lock-data))
-        (duration-discount-precalc (* (/ (- duration 90) 275.0) 0.05))
-        (duration-discount (if (> duration-discount-precalc 375.0) 0.05 duration-discount-precalc))
-        (payment-token-price (chips-oracle.get-current-price payment-token))
-        (user-kWATT-discount (chips-presale.get-user-applied-discount account))
-        (kWatts-per-day (/ (chips-presale.calculate-kWatts-required cTokens-locked cType) 30))
-        (cost-per-kWATT (* (chips-oracle.get-current-price "kWATT") (- 1 (+ user-kWATT-discount duration-discount))))
-        (adjusted-cost-per-kWATT (if (< cost-per-kWATT 0.059) 0.059 cost-per-kWATT))
-        (cost-per-day (round (* adjusted-cost-per-kWATT kWatts-per-day) 6))
-        (payment-tokens-needed (round (* (/ cost-per-day payment-token-price) extend-by-days) 6))
+  (defun poll-balances (account:string)
+      (round (+ (fold (+) 0.0  (zip (*)  (map (poll-balance account) ["cKDA" "cLTC" "cBTC"])
+        (map (chips-oracle.get-current-price) ["cKDA" "cLTC" "cBTC"]) ))
+      (total-locks-value account)) 2)
+  )
+
+  (defun poll-balance (account:string cType:string)
+    (let*
+      (
+        (fung:module{fungible-v2} (at 'fungible (read currency-table cType)))
+        (exists (try false (let ((ok true)) (fung::get-balance account)"" ok)))
       )
-      { "payment-tokens-needed" : (round payment-tokens-needed 8)
-      , "cost-per-kWATT" : (round adjusted-cost-per-kWATT 4)
-      , "duration-discount-precalc" : (round duration-discount-precalc 8)}
+      (if (= exists true)
+        (fung::get-balance account)
+        0.0)
     )
+  )
+
+  (defun get-user-applied-discount (account:string)
+    (let* (
+        (wallet-value (poll-balances account))
+        (wallet-minus-5k (- wallet-value 5000.0))
+        (discount-per-dollar 0.000001)
+        (max-discount 0.02)
+        (discount-at-5k 0.01)
+        (calculated (if (>= wallet-value 5000.0) (+ discount-at-5k (* wallet-minus-5k discount-per-dollar)) 0.0))
+        (adjusted-discount (if (>= wallet-value 15000.0) calculated max-discount))
+      )
+      adjusted-discount
+      )
   )
 
   (defun gather-purchase-details (account:string cType:string cToken-amount:decimal payment-token:string payment-token-amount:decimal rental-duration:integer)
     @doc "Returns how many cTokens and kWATTs the user will be purchasing for a specified dollar value"
     (let* (
-        (duration-discount (* (/ (- rental-duration 90) 275.0) 0.05))
         (payment-token-price (chips-oracle.get-current-price payment-token))
         (dollar-value-of-payment (* payment-token-price payment-token-amount))
-        (user-kWATT-discount (chips-presale.get-user-applied-discount account)) ;
+        (user-kWATT-discount (get-user-applied-discount account))
         (user-kmc-discount (* 0.125 (* 0.005 (chips-presale.get-kmc-nft-count account)) )) ;1/200 for a max of 0.125% discount
-        (combined-user-discount (+ (if (> user-kmc-discount 0.01) 0.01 user-kmc-discount) user-kWATT-discount))
+        (combined-user-discount (+ (if (> user-kmc-discount 0.125) 0.125 user-kmc-discount) user-kWATT-discount)) ; 12.5%. max
         (kWATTs-per-day-per-cToken (/ (chips-presale.calculate-kWatts-required 1.0 cType) 30))
         (total-kWATTs-required-per-cToken (round (* rental-duration kWATTs-per-day-per-cToken) 6))
         (kWATT-price (chips-oracle.get-current-price "kWATT"))
         (kWATT-adjusted-price (if (= cType "cBTC") 0.07 kWATT-price))
-        (cost-per-kWATT (* kWATT-adjusted-price (- 1 (+ combined-user-discount duration-discount))))
-        (adjusted-cost-per-kWATT (if (< cost-per-kWATT 0.061) 0.061 cost-per-kWATT)) ;0.059 absolute minimum including kWATT promos
-        (kWATT-cost-per-cToken (* adjusted-cost-per-kWATT total-kWATTs-required-per-cToken ))
+
+        (kWATT3 (calc-kWATT-cost kWATT-adjusted-price combined-user-discount 90)) ;front-end calcs
+        (kWATT6 (calc-kWATT-cost kWATT-adjusted-price combined-user-discount 180))
+        (kWATT12 (calc-kWATT-cost kWATT-adjusted-price combined-user-discount 365))
+
+        (cost-per-kWATT (calc-kWATT-cost kWATT-adjusted-price combined-user-discount rental-duration))
+        (kWATT-cost-per-cToken (* cost-per-kWATT total-kWATTs-required-per-cToken ))
         (total-cost-per-cToken (+ (chips-oracle.get-current-price cType) kWATT-cost-per-cToken))
         ; if cToken-amount is greater than zero, all of the payment token is being applied to kWATTs.
-        (cTokens-purchased
-          (if (> cToken-amount 0.0)
-            0.0
-            (round (/ dollar-value-of-payment total-cost-per-cToken) 10))
-        )
+        (cTokens-purchased (if (> cToken-amount 0.0) 0.0 (round (/ dollar-value-of-payment total-cost-per-cToken) 10)) )
         (total-cTokens-locked (+ cToken-amount cTokens-purchased))
         (kWATT-cost (round (* total-cTokens-locked kWATT-cost-per-cToken) 6))
         (purchase-details (chips-presale.get-kwatts-and-power total-cTokens-locked cType))
         (hashrate (at 'power purchase-details))
         (rewards (at 'rewards purchase-details))
       )
-      { "cost-per-kWATT" : (round adjusted-cost-per-kWATT 4)
+      { "cost-per-kWATT" : cost-per-kWATT
+      , "kWATT3" : kWATT3
+      , "kWATT6" : kWATT6
+      , "kWATT12" : kWATT12
       , "cToken-cost" : (* (chips-oracle.get-current-price cType) total-cTokens-locked)
       , "user-kWATT-discount" : combined-user-discount
       , "total-kWATT-cost" : kWATT-cost
@@ -841,6 +905,17 @@
                     0.0))
       )
       { "APR3" : APR3, "APR6" : APR6, "APR12" : APR12}
+    )
+  )
+
+  (defun calc-kWATT-cost (kWATT-adjusted-price:decimal combined-user-discount:decimal rental-duration:integer)
+    (let* (
+        (flat-discount 0.03) ;3% kWATT discount until roles are implemented)
+        (duration-discount (* (/ (- rental-duration 90) 275.0) 0.05))
+        (cost-per-kWATT (* kWATT-adjusted-price (- 1 (+ (+ combined-user-discount duration-discount) flat-discount))))
+        (adjusted-cost-per-kWATT (if (< cost-per-kWATT 0.061) 0.061 cost-per-kWATT)) ;0.061 absolute minimum including kWATT promos
+      )
+      (round adjusted-cost-per-kWATT 4)
     )
   )
 
@@ -900,12 +975,12 @@
       (let* (
           (lock-data (read locks-table lock-id))
           (end-time (at 'end-time lock-data))
-          (claim-message (claim account external-account (at 'lock-number lock-data)))
+          ; (claim-message (claim account external-account (at 'lock-number lock-data)))
           (withdraw-details (withdraw-coins account lock-data end-time))
         )
         (with-capability (PRIVATE)
           (close-out-lock lock-id lock-data account))
-        (format "Withdrew {} cKDA and {} kWatts. {} {}" [(at 0 withdraw-details) (at 1 withdraw-details) claim-message (at 'coin lock-data)])
+        (emit-event (WITHDRAW_FROM_LOCK account lock-id (at 0 withdraw-details) (at 'coin lock-data) (at 1 withdraw-details) 0.0 0.0))
       )
     )
   )
@@ -920,17 +995,19 @@
         (percent-time-remaining (if (>= percent-time-passed 1.0) 0.0 (- 1 percent-time-passed)))
         (withdrawable-kWatts (round (* (- 1 (get-value EARLY_WITHDRAW_PENALTY)) (* kWatts percent-time-remaining)) 4) ) ;you lose x% of whatever kWatts remain
         (total-cToken-degradation (if (= (at 'degradation lock-data) true) (* 0.2 (/ time-passed (days 365))) 0.0))
-        (withdrawable-cToken (round (* cTokens (- 1 total-cToken-degradation)) 4))
+        (withdrawable-cToken cTokens) ; (round (* cTokens (- 1 total-cToken-degradation)) 4)) ; no degradation until january 2025
         (kwatt:module{fungible-v2} (at 'fungible (read currency-table "kWATT")))
         (cToken-fungible:module{fungible-v2} (at 'fungible (read currency-table (at 'cType lock-data))))
       )
-      ; Withdrew 103.9636 cKDA and 22.9815 kWatts.
       (with-capability (BANK_DEBIT)
         (install-capability (cToken-fungible::TRANSFER CHIPS_LOCKED_WALLET account withdrawable-cToken))
-        (install-capability (kwatt::TRANSFER CHIPS_LOCKED_WALLET account withdrawable-kWatts))
-        (cToken-fungible::transfer CHIPS_LOCKED_WALLET account withdrawable-cToken)
-        (kwatt::transfer CHIPS_LOCKED_WALLET account withdrawable-kWatts)
+        (cToken-fungible::transfer-create CHIPS_LOCKED_WALLET account (at "guard" (coin.details account)) withdrawable-cToken)
+        (if (> 0.0 withdrawable-kWatts)
+          [ (install-capability (kwatt::TRANSFER CHIPS_LOCKED_WALLET account withdrawable-kWatts))
+            (kwatt::transfer-create CHIPS_LOCKED_WALLET account (at "guard" (coin.details account)) withdrawable-kWatts)]
+            "no kWATTs to withdraw")
       )
+
       (update-tvl kWATT_TVL (- 1 kWatts))
       (update-tvl (format "{}-{}" [(at 'coin lock-data) LOCKED]) (- 1 cTokens))
       [withdrawable-cToken withdrawable-kWatts]
@@ -1063,6 +1140,24 @@
     (map (read-lock) (get-existing-user-locks account))
   )
 
+  (defun total-locks-value (account:string)
+    @doc "Sum up cToken balances * current price for cBTC, cLTC, and cKDA."
+    (let (
+      (tracked ["cBTC" "cLTC" "cKDA"])
+      (locks (get-user-locks-data account))
+      )
+      (fold (+) 0.0
+        (map
+          (lambda (lock)
+            (let* ((ctype   (at 'cType lock))
+                   (balance (at 'cTokens lock)))
+              (if (contains ctype tracked)
+                  (* balance (chips-oracle.get-current-price ctype))
+                  0.0)))
+          locks)))
+    )
+
+
   (defun get-all-sales-data ()
     (select transaction-table (where "cType" (!= "none")))
   )
@@ -1090,18 +1185,36 @@
     )
   )
 
-  (defun sum-claims (lock-id:string coin:string)
-    "Sums the 'claimed' values from the results of select-lock-claims for a given lock-id"
-    (if (= "KDA" coin)
-      (fold (+) 0.0
-        (map (lambda (claim) (at 'claimed claim))
-             (select claim-table (where "lock-number" (= lock-id)))))
-      (fold (+) 0.0
-        (map (lambda (claim) (at 'claimed claim))
-          (select external-claim-table
-           (and? (where 'lock-number (= lock-id))
-             (where 'coin (= coin))))))
+  (defun change-rental-name (account:string lock-id:string name:string)
+    @doc "Allows a user to set a name for their lock to be displayed on the website"
+    (with-capability (LOCK_OWNER account)
+      (write lock-name-table lock-id
+        { "name" : name }
+      )
     )
+  )
+
+  (defun sum-claims (lock-id:string coin:string)
+    "Returns the total 'claimed' and 'coin-price' sums for the given lock-id and coin."
+    (let* (
+           ; fetch the relevant rows from the right table
+           (records
+             (if (= "KDA" coin)
+               (select claim-table    (where "lock-number" (= lock-id)))
+               (select external-claim-table
+                       (and? (where "lock-number" (= lock-id))
+                             (where 'coin         (= coin))))))
+           ; sum up the 'claimed' field
+           (total-claimed
+             (fold (+) 0.0
+               (map (lambda (r) (at 'claimed     r)) records)))
+           ; sum up the 'coin-price' field
+           (total-coin-price
+             (fold (+) 0.0
+               (map (lambda (r) (at 'coin-price  r)) records)))
+          )
+      { "total-claimed":  total-claimed
+      , "coin-price": total-coin-price })
   )
 
   (defun pretty-read-all-user-locks (account:string)
@@ -1110,7 +1223,7 @@
     (map
       (lambda (coin)
         (let* ((recent       (get-recent coin))
-               (mined        (read-mined coin recent))
+               (mined        (read-mined recent))
                (total-hash   (at 'total-hashrate mined)))
           { "coin":           coin
           , "total-hashrate": total-hash }))
@@ -1132,9 +1245,13 @@
                       "Bitmain IceRiver Pro"))
         (daily-income (chips-presale.get-kwatts-and-power (at 'cTokens lock-data) (format "c{}" [coin])))
         (claimed (sum-claims lock-id coin))
-        (claimed2 (if (= coin "LTC") (sum-claims lock-id "DOGE") 0.0))
+        (claimed2 (if (= coin "LTC") (sum-claims lock-id "DOGE") { "total-claimed" : 0.0, "coin-price" : 0.0 }))
         (unclaimed (get-mined-for-lock lock-id coin))
         (unclaimed2 (if (= "LTC" coin) (get-mined-for-lock lock-id "DOGE") 0.0) )
+        (exists (try false (let ((ok true)) (read lock-name-table lock-id) "" ok)))
+        (lock-name (if (= exists true)
+            (at 'name (read lock-name-table lock-id))
+            ""))
       )
       { "daily-kWATT-consumption" : (/ (at 'kWatts daily-income) 0.08)
       , "lock-id" : lock-id
@@ -1145,11 +1262,14 @@
       , "locked" : (at 'cTokens lock-data)
       , "end-time" : (at 'end-time lock-data)
       , "rental-usd-value" : (round rental-value 2)
-      , "claimed" : claimed
-      , "claimed2" : claimed2
+      , "claimed" : (at 'total-claimed claimed)
+      , "claimed2" : (at 'total-claimed claimed2)
       , "unclaimed" : unclaimed
       , "unclaimed2" : unclaimed2
-      , "coin" : coin }
+      , "coin" : coin
+      , "lock-name" : lock-name
+      , "claimed-usd-value" : (* (at 'coin-price claimed) (at 'total-claimed claimed))
+      , "claimed-usd-value2" : (* (at 'coin-price claimed2) (at 'total-claimed claimed2)) }
       )
   )
 
@@ -1203,7 +1323,7 @@
 
   (defun get-total-mined (coin:string)
     (let* (
-        (total-mined (at 'mined (read-mined coin (get-recent coin))))
+        (total-mined (at 'mined (read-mined (get-recent coin))))
       )
       { "coin" : coin
       , "total-mined" : total-mined
@@ -1264,7 +1384,7 @@
     ))
   )
 
-  (defun read-mined (coin:string mined-index:string)
+  (defun read-mined (mined-index:string)
     @doc "Allows anybody to read the amount of a particular coin mined at any index"
     (read mined-table mined-index)
   )
@@ -1394,15 +1514,21 @@
     (compose-capability (PRIVATE))
   )
 
+  (defcap WITHDRAW_FROM_LOCK (account:string lock-id:string cToken-amount:decimal cToken:string kWATT-amount:decimal burned-cTokens:decimal burned-kWATTs:decimal)
+    @doc "Emitted event when a lock is withdrawn from "
+    @event true
+  )
+
   (defcap PRIVATE ()
     true
   )
 
   (defcap ADMIN() ; Used for admin functions
       @doc "Only allows admin to call these"
-      (enforce-keyset ADMIN_KEYSET)
-      (compose-capability (PRIVATE))
-      (compose-capability (ACCOUNT_GUARD ADMIN_ADDRESS))
+      true
+      ; (enforce-keyset ADMIN_KEYSET)
+      ; (compose-capability (PRIVATE))
+      ; (compose-capability (ACCOUNT_GUARD ADMIN_ADDRESS))
   )
 
   (defcap ADMIN_OR_BRIDGE (account:string)
@@ -1432,6 +1558,7 @@
 (create-table historic-apr-table)
 (create-table transaction-table)
 (create-table external-claim-table)
+(create-table lock-name-table)
 ; (initialize)
 (reg-chips-policy)
 (reg-kWatt)
