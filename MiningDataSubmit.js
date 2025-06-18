@@ -4,7 +4,8 @@ import path from 'path';
 import {
   Pact,
   createClient,
-  createSignWithKeypair
+  createSignWithKeypair,
+  isSignedTransaction
 } from '@kadena/client';
 
 
