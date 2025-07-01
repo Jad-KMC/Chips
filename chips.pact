@@ -58,6 +58,16 @@
   (defconst ADMIN_KEYSET "n_62231f26f11dab92b868875810a4aaa5af13db61.chips-admin")
   (defconst MINIMUM_ENERGY_PRICE 0.061)
   (defconst BTC_ENERGY_PRICE 0.07)
+
+  ;additional constants
+  (defconst SUPPORTED_COINS_LIST ["KDA" "LTC" "BTC" "DOGE"])
+  (defconst ON_CHAIN_COINS "KDA")
+  (defconst EXTERNAL_COINS ["LTC" "BTC"])
+  (defconst PRIMARY_COINS ["KDA" "LTC" "BTC"])
+  (defconst RENTAL_DURATION_SCALING_FACTOR 0.07777777778)
+  (defconst ACTIVE_cTOKENS ["cKDA" "cLTC" "cBTC"])
+  (defconst WATT_TO_kWATT_CONVERSION_FACTOR 41.66666)
+
   ; (defconst )
   (defschema counts-schema
     count:integer
@@ -160,7 +170,7 @@
   )
 
   (defschema recent-mined-key-schema
-    ; key is the relevant coin. ex. "kda" "btc" "dog" (dog = doge, 3 letter symbols only)
+    ; key is the relevant coin. ex. "kda" "btc" "doge"
     recent:string
   )
 
@@ -394,8 +404,8 @@
                                       acc))
                                 0.0
                                 data) })
-                 ["ALPH" "KAS" "BTC" "LTC" "KDA"])))
-           ; Define the list of on-chain coins (extend as needed)
+                 PRIMARY_COINS)))
+           ; Define the list of on-chain coins
            (on-chain-coins ["KDA"])
            ; Partition data using contains.
            (on-chain (filter (lambda (entry) (contains (at 'coin entry) on-chain-coins )) folded-data))
@@ -454,7 +464,7 @@
             , "coins-owed" : 0.0
             })
           { "coin" : coin
-          , "claim" : (if (contains coin ["LTC" "KAS" "ALPH" "BTC"])
+          , "claim" : (if (contains coin EXTERNAL_COINS)
                         (with-capability (PRIVATE) (initiate-external-claim account coin (at 0 external-account) total lock-id))
                         (with-capability (PRIVATE)
                           (record-claim account lock-id total coin)
@@ -637,7 +647,7 @@
     @doc "For accounting purposes, return the entire reward balance owed to Chips customers"
     (let* (
       (all-data (map (get-unclaimed-for-lock) (keys locks-table)))
-      (coins ["KDA" "LTC" "BTC" "DOGE"])
+      (coins SUPPORTED_COINS_LIST)
       (result
       (map
          (lambda (c)
@@ -654,23 +664,6 @@
          coins))
       )
       result
-    )
-  )
-
-  (defun migrate-icBTC (account:string cType:string cToken-amount:decimal rental-duration:integer previously-mined:decimal caller:string)
-    (let* (
-        (hashrate cToken-amount)
-        (total-kWATTs-required (* (* 0.45 rental-duration) cToken-amount))
-        (orders-count-string (int-to-str 10 (get-count ORDERS_COUNT)))
-        (cToken-module:module{fungible-v2} (at 'fungible (read currency-table cType)))
-      )
-      (with-capability (PRIVATE)
-        (increase-count ORDERS_COUNT)
-        (mint-kWATT CHIPS_LOCKED_WALLET (round total-kWATTs-required 8))
-        (order-work cType cToken-amount)
-        (create-lock total-kWATTs-required cToken-amount account rental-duration hashrate (drop 1 cType) cType previously-mined)
-        (format "A {} day {} rental has been started on behalf of {} with a hashrate of {}. Previously-mined: {}. The rental ID is: {} " [rental-duration cType account hashrate previously-mined orders-count-string])
-      )
     )
   )
 
@@ -745,7 +738,7 @@
     (let* (
         (minimum-rental-duration (get-count MINIMUM_LOCK_DURATION))
         (purchase-details (gather-purchase-details account cType cToken-amount payment-token payment-token-amount rental-duration))
-        (rental-duration-bonus (str-to-int (drop -2 (format "{}" [(round (* 0.07777777778 rental-duration) 0)]))))
+        (rental-duration-bonus (str-to-int (drop -2 (format "{}" [(round (* RENTAL_DURATION_SCALING_FACTOR rental-duration) 0)]))))
 
         (total-cTokens-locked (at 'total-cTokens-locked purchase-details))
         (hashrate (at 'hashrate purchase-details))
@@ -795,8 +788,8 @@
   )
 
   (defun poll-balances (account:string)
-      (round (+ (fold (+) 0.0  (zip (*)  (map (poll-balance account) ["cKDA" "cLTC" "cBTC"])
-        (map (chips-oracle.get-current-price) ["cKDA" "cLTC" "cBTC"]) ))
+      (round (+ (fold (+) 0.0  (zip (*)  (map (poll-balance account) ACTIVE_cTOKENS)
+        (map (chips-oracle.get-current-price) ACTIVE_cTOKENS) ))
       (total-locks-value account)) 2)
   )
 
@@ -872,42 +865,6 @@
     )
   )
 
-  (defun gather-purchase-details2 (account:string cType:string cToken-amount:decimal payment-token:string payment-token-amount:decimal rental-duration:integer)
-    (let* (
-        (purchase-details (gather-purchase-details account cType cToken-amount payment-token payment-token-amount rental-duration))
-        (aprs (get-apr-details cType (at 'cost-per-kWATT purchase-details)))
-      )
-      (+ { "APR3" : (at 'APR3 aprs)
-      , "APR6" : (at 'APR6 aprs)
-      , "APR12" : (at 'APR12 aprs) } purchase-details)
-    )
-  )
-
-  (defun get-apr-details (cType:string kWATT-price:decimal)
-    (let* (
-      (amount-under-baseline (- (chips-oracle.get-current-price "kWATT") kWATT-price))
-      (intervals-of-0001 (/ amount-under-baseline 0.0001))
-      (adjustment (* 0.0004 intervals-of-0001))
-      (APR3 (cond
-                    ((= "cLTC" cType) (+ 9.78 adjustment))
-                    ((= "cKDA" cType) (+ 1.19 adjustment))
-                    ((= "cBTC" cType) (+ 2.96 adjustment))
-                    0.0))
-      (APR6 (cond
-                    ((= "cLTC" cType) (+ 18.61 adjustment))
-                    ((= "cKDA" cType) (+ 2.08 adjustment))
-                    ((= "cBTC" cType) (+ 6.5 adjustment))
-                    0.0))
-      (APR12 (cond
-                    ((= "cLTC" cType) (+ 34.45 adjustment))
-                    ((= "cKDA" cType) (+ 3.54 adjustment))
-                    ((= "cBTC" cType) (+ 10.64 adjustment))
-                    0.0))
-      )
-      { "APR3" : APR3, "APR6" : APR6, "APR12" : APR12}
-    )
-  )
-
   (defun calc-kWATT-cost (kWATT-adjusted-price:decimal combined-user-discount:decimal rental-duration:integer)
     (let* (
         (flat-discount 0.03) ;3% kWATT discount until roles are implemented)
@@ -922,7 +879,7 @@
   (defun order-work (cType:string cToken-amount:decimal)
     @doc "Transfers kWATTs and cTokens from the chips bank or a user wallet to the locked wallet"
     (require-capability (PRIVATE))
-    (enforce (contains cType ["cKDA" "cLTC" "cBTC" "cKAS" "cALPH"]) (format "{}: This type of cToken is not supported" [cType]))
+    (enforce (contains cType ACTIVE_cTOKENS) (format "{}: This type of cToken is not supported" [cType]))
     (enforce (> cToken-amount 0.0) "cToken amount must be positive")
     (let*
         (
@@ -949,12 +906,9 @@
           (chips-details (map (get-chip-details) chips-to-rent))
           (total-watts (fold (+) 0 (map (at 'wattage) chips-details)))
           (total-hashrate (fold (+) 0 (map (at 'hashrate) chips-details)))
-          (required-kWatts (* (round (/ total-watts 41.66666) 4) rental-duration)) ;41.6666 is 1000/24, coverting watts to kW and accounting for 24 hours in a day
-          (required-cKDA (round (* 1.666667 total-hashrate) 4)) ;; TODO://1.666667 is assuming a chip is 0.6 TH/s. A chip varies in hashrate
+          (required-kWatts (* (round (/ total-watts WATT_TO_kWATT_CONVERSION_FACTOR) 4) rental-duration)) ;WATT_TO_kWATT_CONVERSION_FACTOR is 1000/24, coverting watts to kW and accounting for 24 hours in a day
+          (required-cKDA total-hashrate)
           (minimum-lock-duration (get-count MINIMUM_LOCK_DURATION))
-          ; ()
-          ; 1 cKDA covers 0.6 TH/s
-          ; 0.001666667 cKDA per 0.001 TH/s ( 1 GH/s)
 
         )
         (enforce (>= rental-duration minimum-lock-duration) "rental duration must be at least 3 days")
@@ -1120,14 +1074,6 @@
     (read mineable-coins-list-table SUPPORTED_COINS)
   )
 
-  (defun get-all-expired-locks ()
-    @doc "For admin use to release tokens from an expired lock on a daily basis"
-    ; TODO: flesh this out more
-    ; the tokens themselves don't have lock times, so we need to check the lock
-    ; after the lock is checked and released, the tokens themselves should not be
-    (select locks-table (where "end-time" (< (at "block-time" (chain-data)))))
-  )
-
   (defun get-existing-user-locks (account:string)
     (with-default-read user-locks-table account
       { "locks": [] }
@@ -1160,29 +1106,6 @@
 
   (defun get-all-sales-data ()
     (select transaction-table (where "cType" (!= "none")))
-  )
-
-  (defun get-homepage-info ()
-    { "highest-apr" : 33.5
-    , "TVL" : (get-tvl)
-    , "Active Miners" : 72 }
-  )
-
-  (defun get-tvl ()
-    (let*
-      (
-        (kWATT-fung:module{fungible-v2} (at 'fungible (read currency-table "kWATT")))
-        (kda-price (chips-oracle.get-current-price "KDA"))
-        (cToken-details (map (get-card-details) ["KDA" "LTC" "BTC"]) )
-        (cToken-TVL (fold (+) 0.0 (map (at 'TVL) cToken-details)) )
-        (kWATTs-locked (kWATT-fung::get-balance "chips-locked-wallet"))
-        (kWATT-value (chips-oracle.get-current-price "kWATT"))
-        (kWATT-TVL (* kWATT-value kWATTs-locked))
-        (chips-usd-tvl (+ kWATT-TVL cToken-TVL))
-        (chips-kda-tvl (/ chips-usd-tvl kda-price))
-      )
-      {"coin" : (round chips-kda-tvl 6), "usd-tvl" : (round chips-usd-tvl 2)}
-    )
   )
 
   (defun change-rental-name (account:string lock-id:string name:string)
@@ -1238,11 +1161,6 @@
         (kWatts-value (* (at 'kWatts lock-data) (chips-oracle.get-current-price "kWATT") ))
         (cToken-value (* (at 'cTokens lock-data) (chips-oracle.get-current-price (format "c{}" [coin]))))
         (rental-value (+ kWatts-value cToken-value))
-        (powered-by (cond
-                      ((= "LTC" coin) "Bitmain Antminer L9")
-                      ((= "KDA" coin) "Bitmain Antminer KA3")
-                      ((= "BTC" coin) "Bitmain S19k Pro")
-                      "Bitmain IceRiver Pro"))
         (daily-income (chips-presale.get-kwatts-and-power (at 'cTokens lock-data) (format "c{}" [coin])))
         (claimed (sum-claims lock-id coin))
         (claimed2 (if (= coin "LTC") (sum-claims lock-id "DOGE") { "total-claimed" : 0.0, "coin-price" : 0.0 }))
@@ -1256,7 +1174,6 @@
       { "daily-kWATT-consumption" : (/ (at 'kWatts daily-income) 0.08)
       , "lock-id" : lock-id
       , "apr" : 28.6
-      , "powered-by" : powered-by
       , "daily-income" : (at 'rewards daily-income)
       , "hashrate" : (at 'hashrate lock-data)
       , "locked" : (at 'cTokens lock-data)
@@ -1316,11 +1233,6 @@
     )
   )
 
-  (defun get-marketplace-details ()
-    { "card-details" : (map (get-card-details) (filter (!= "DOGE") (at 'coins (get-mineable-coins))))
-    , "total-mined" :  (map (get-total-mined) (at 'coins (get-mineable-coins))) }
-  )
-
   (defun get-total-mined (coin:string)
     (let* (
         (total-mined (at 'mined (read-mined (get-recent coin))))
@@ -1328,22 +1240,6 @@
       { "coin" : coin
       , "total-mined" : total-mined
       , "dollar-value" : (* total-mined (chips-oracle.get-current-price coin))}
-    )
-  )
-
-  (defun get-card-details (coin:string)
-    (let* (
-        (fung:module{fungible-v2} (at 'fungible (read currency-table (+ "c" coin))))
-        (bank-cToken-balance (fung::get-balance CHIPS_BANK))
-        (locked-bank-balance (fung::get-balance CHIPS_LOCKED_WALLET))
-        (TVL (* locked-bank-balance (chips-oracle.get-current-price (+ "c" coin))))
-        (apr (get-apr-details (+ "c" coin) (if (= "BTC" coin) 0.07 0.08)))
-      )
-      { "coin" : coin
-      , "APR" : (at 'APR12 apr)
-      , "hashrate-available" : (round bank-cToken-balance 6)
-      , "hashrate-locked" : (round locked-bank-balance 6) ; todo make this more accurate (cTokens degrade)
-      , "TVL" : (round TVL 2)}
     )
   )
 
@@ -1523,7 +1419,7 @@
     true
   )
 
-  (defcap ADMIN() ; Used for admin functions
+  (defcap ADMIN() ; update to use keysets when deploying outside of repl environment
       @doc "Only allows admin to call these"
       true
       ; (enforce-keyset ADMIN_KEYSET)
