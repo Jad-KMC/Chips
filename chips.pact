@@ -61,7 +61,6 @@
 
   ;additional constants
   (defconst SUPPORTED_COINS_LIST ["KDA" "LTC" "BTC" "DOGE"])
-  (defconst ON_CHAIN_COINS "KDA")
   (defconst EXTERNAL_COINS ["LTC" "BTC"])
   (defconst PRIMARY_COINS ["KDA" "LTC" "BTC"])
   (defconst RENTAL_DURATION_SCALING_FACTOR 0.07777777778)
