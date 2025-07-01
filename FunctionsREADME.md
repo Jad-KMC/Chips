@@ -226,7 +226,5 @@ Withdraws locked cTokens, and reclaims any unused kWATTs if the rental has not f
 
 ---
 
-Let me know when you want to append a section for **admin-only functions**, **keyset controls**, or **reward oracle logic**.
-
 ```
 ```
