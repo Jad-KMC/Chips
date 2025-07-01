@@ -591,9 +591,7 @@
 (commit-tx)
 ;; //front-end functions
 (begin-tx)
-(free.chips.get-marketplace-details)
 (free.chips.admin-withdraw-from-bank free.cBTC 1.0)
-(free.chips.get-tvl)
 (free.chips.get-all-unclaimed-rewards)
 (commit-tx)
 
